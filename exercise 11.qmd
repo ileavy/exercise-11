@@ -1,0 +1,229 @@
+---
+title: "exercise 11"
+format: html
+editor: visual
+---
+
+## Exercise 11
+
+```{r setup}
+install.packages("naniar")
+library(naniar)
+library(tidyverse)
+library(ggplot2)
+library(MASS)
+f <- "https://raw.githubusercontent.com/difiore/ada-datasets/main/Mammal_lifehistories_v2.txt"
+d <- read_tsv(f, col_names = TRUE)
+```
+
+1.  Replace -999 with NA
+
+```{r}
+d <- d |> replace_with_na_all(condition = ~.x == -999)
+names(d)
+```
+
+2.  Data Cleaning
+
+    Drop the variables **litter size** and **refs**.
+
+    Rename the variable **max. life(mo)** to **maxlife(mo)**.
+
+    Rename the variable **wean mass(g)** to **weanmass(g)**.
+
+```{r}
+#i know i could do this all at once but i don't wanna
+d <- d |> select(-c(`litter size`, refs))
+d <- d |> mutate( `maxlife(mo)` = `max. life(mo)`)
+d <- d |> mutate(`weanmass(g)` = `wean mass(g)`)
+d <- d |> select(- "wean mass(g)") |> select(- "max. life(mo)")
+names(d)
+#for some reasons the select function is not working 
+```
+
+3.  Log transform all of the other numeric variables
+
+```{r}
+d <- d |> mutate(`mass(g)` = log(`mass(g)`), `gestation(mo)` = log(`gestation(mo)`), `newborn(g)` = log(`newborn(g)`), `weaning(mo)` = log(`weaning(mo)`), `AFR(mo)` = log(`AFR(mo)`), `litters/year` = log(`litters/year`), `maxlife(mo)` = log(`maxlife(mo)`), `weanmass(g)` = log(`weanmass(g)`))
+```
+
+4.  Regress the (now log transformed) *age* \[**gestation(mo)**, **weaning(mo)**, **AFR(mo)** (i.e., age at first reproduction), and **maxlife(mo)** (i.e., maximum lifespan)\] and *mass* \[**newborn(g)** and **weanmass(g)**\] variables on (now log transformed) overall body **mass(g)** and add the residuals to the dataframe as new variables \[**relGest**, **relWean**, **relAFR**, **relLife**, **relNewbornMass**, and **relWeaningMass**\].
+
+```{r}
+#Age Regressions
+lm1 <- lm(`mass(g)` ~ `gestation(mo)`, data = d, na.action=na.exclude)
+lm2 <- lm(`mass(g)` ~ `weaning(mo)`, data = d, na.action=na.exclude)
+lm3 <- lm(`mass(g)` ~ `AFR(mo)`, data = d, na.action=na.exclude)
+
+#Lifespan Regression
+lm4 <- lm(`mass(g)` ~ `maxlife(mo)`, data = d, na.action=na.exclude)
+
+# Mass Regression
+lm5 <- lm(`mass(g)` ~ `newborn(g)`, data = d, na.action=na.exclude)
+lm6 <- lm(`mass(g)` ~ `weanmass(g)`, data = d, na.action=na.exclude)
+
+d <- d |> mutate(relGest = resid(lm1), relWean = resid(lm2), relAFR = resid(lm3), relLife = resid(lm4), relNewbornMass = resid(lm5), relWeaningMass = resid(lm6))
+names(d)
+```
+
+5.  Plot residuals of max lifespan (**relLife**) in relation to **Order**. Which mammalian orders have the highest residual lifespan?
+
+```{r}
+#| warning: false
+#sorry this is an ugly plot
+p1 <- ggplot(d, aes(x = order, y = relLife)) +
+  geom_boxplot() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))
+p1
+```
+
+*The highest residual maximum life spans are in the orders Artiodactyla (the even-toed ungulates), Cetacea (whales and dolphins), and Perissodactyla (the odd-toed ungulates). The mean residual life span for these orders is above 1.5 according to my plot.*
+
+Plot residuals of newborn mass (**relNewbornMass**) in relation to **Order**. Which mammalian orders have the have highest residual newborn mass?
+
+```{r}
+#| warning: false
+p2 <- ggplot(d, aes(x = order, y = relNewbornMass)) +
+  geom_boxplot() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))
+p2
+```
+
+*The highest mean residual masses at birth belong to the orders Carnivora, Perissodactyla, Probiscidea (elephants), and Tubulidentata (aardvark).*
+
+Plot residuals of weaning mass (**relWeaningMass**) in relation to **Order**. Which mammalian orders have the have highest residual weaning mass?
+
+```{r}
+#| warning: false
+p3 <- ggplot(d, aes(x = order, y = relWeaningMass)) +
+  geom_boxplot() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))
+p3
+```
+
+The highest mean residial masses at weaning belong to Xenarthra (sloths), Tubulidentata, Hyracoidea (hyraxes), and Sirenia (manatees and dugongs). Interestingly, all of these orders have very few representative species.
+
+6.  Run models and a model selection process to evaluate what (now log transformed) variables best predict each of the two response variables, **maxlife(mo)** and **AFR(mo)**, from the set of the following predictors: **gestation(mo)**, **newborn(g)**, **weaning(mo)**, **weanmass(g)**, **litters/year**, and overall body **mass(g)**.
+
+*For maxlife(mo) I will use a forward approach and for AFR(mo) I will use a backward approach, both using the F statistic to determine the best model.*
+
+```{r}
+#| warning: false
+
+#first, drop rows with NA values for any of the predictors or outcomes 
+#yes this could be cleaner
+nrow(d) #1440
+d <- d |> drop_na(`maxlife(mo)`) |> drop_na(`AFR(mo)`) |> drop_na(`gestation(mo)`) |> drop_na(`newborn(g)`) |> drop_na(`weaning(mo)`) |> drop_na(`weanmass(g)`) |> drop_na(`litters/year`) |> drop_na(`mass(g)`)
+nrow(d) #206
+
+#m0 reflects the maxlife at the intercept, without any predictors
+m0 <- lm(data = d, `maxlife(mo)` ~ 1)
+add1(m0, scope = .~. + `gestation(mo)` + `newborn(g)` + `weanmass(g)` + `litters/year` + `mass(g)`, test = "F")
+#for all variables that have a p < 0.05, adding that variable ALONE would add explanatory power to our null model
+```
+
+```{r}
+#| warning: false
+#add the predictor with the highest F statistic to the null model
+#add gestation length to the model
+
+m1 <- update(m0, formula = .~. + `gestation(mo)`)
+#check if the remaining predictors are still significantly contributing to m1
+add1(m1, scope = .~. + `newborn(g)` + `weanmass(g)` + `litters/year` + `mass(g)`, test = "F")
+#all predictors are still significant so I can't immediately count any out
+```
+
+```{r}
+#| warning: false
+#add litters/year to the model
+m2 <- update(m1, formula = .~. + `litters/year`)
+add1(m2, scope = .~. + `newborn(g)` + `weanmass(g)` + `mass(g)`, test = "F")
+#all are still significant
+```
+
+```{r}
+#| warning: false
+#adding mass(g)
+m3 <- update(m2, formula = .~. + `mass(g)`)
+add1(m3, scope = .~. + `newborn(g)` + `weanmass(g)`, test = "F")
+#neither newborn mass or wean mass are signfiicant anymore, so m3 is my final model
+```
+
+```{r}
+#AFR(mo) model
+m.full <- lm(data = d, `AFR(mo)` ~  `gestation(mo)` + `newborn(g)` + `weanmass(g)` + `litters/year` + `mass(g)`)
+drop1(m.full, test = "F")
+#DROP the predictor with the lowest F statistic
+#in this case, weanmass(g) where F = 0.1094
+```
+
+```{r}
+m1 <- update(m.full, formula = .~. - `weanmass(g)`)
+drop1(m1, test = "F")
+#drop newborn(g), F = 0.2972
+```
+
+```{r}
+m2 <- update(m1, formula = .~. - `newborn(g)`)
+drop1(m2, test = "F")
+#drop mass(g) where F = 1.3875
+```
+
+```{r}
+m3 <- update(m2, formula = .~. - `mass(g)`)
+drop1(m3, test = "F")
+#both the remaining predictors are significant so this is my final model
+```
+
+-   For each of the two response variables, indicate what is the best model overall based on AICc and how many models have a delta AICc of 4 or less?
+
+*Again, I will begin with the full model for AFR and use an additive approach for max lifespan.*
+
+```{r}
+s_AFR <- stepAIC(m.full, scope = .~., direction = "both")
+#wean mass, mass, and newborn mass all reduce the AIC when included in the model
+#the best model for AFR would be including mass, weanmass, and newborn mass but no other variables
+```
+
+*For predicting AFR, weanmass(g), mass(g), and newborn(g) all reduce the AIC when included in the full model. The best model is one that takes gestation(mo) and litters/year as predictor variables, and does not include the mass variables.*
+
+```{r}
+s <- stepAIC(m0,
+scope = .~. + `gestation(mo)` + `newborn(g)` + `weanmass(g)` + `litters/year` + `mass(g)`, direction = "both")
+#the AIC is most reduced by gestation(mo), so it gets added to the model
+#the models have predictors added until any further predictors would no longer reduce the model
+```
+
+*The best model for maxlife(mo) is one that includes newborn(g), mass(g), litters/year, and gestation(mo), but does not include weanmass(g).*
+
+*None of the models have an AIC \<= 4.*
+
+-   What variables, if any, appear in all of this set of “top” models?
+
+*For both maxlife and AFR, gestation length and litters/year are signfiicant predictors.*
+
+-   Calculate and plot the model-averaged coefficients and their CIs across this set of top models.
+
+```{r}
+library(MuMIn)
+
+##Max Lifespan
+m.life <- lm(data = d, `maxlife(mo)` ~  `gestation(mo)` + `newborn(g)` + `weanmass(g)` + `litters/year` + `mass(g)`, na.action = na.fail)
+mods.life <- dredge(m.life)
+
+mavg.life <- summary(model.avg(mods.life, subset = delta <=4, fit = TRUE))
+mavg.life$msTable
+
+confint(mavg.life)
+```
+
+```{r}
+##AFR
+m.afr <- lm(data = d, `AFR(mo)` ~  `gestation(mo)` + `newborn(g)` + `weanmass(g)` + `litters/year` + `mass(g)`, na.action = na.fail)
+mods.afr <- dredge(m.afr)
+
+mavg.afr <- summary(model.avg(mods.afr, subset = delta <=4, fit = TRUE))
+mavg.afr$msTable
+
+confint(mavg.afr)
+```
